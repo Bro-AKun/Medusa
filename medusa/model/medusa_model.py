@@ -228,6 +228,8 @@ class MedusaModelABC(nn.Module):
                 filename = hf_hub_download(pretrained_model_name_or_path, "medusa_lm_head.pt")
             medusa_head_state_dict = torch.load(filename, map_location=model.device)
             model.medusa_head.load_state_dict(medusa_head_state_dict, strict=False)
+            model.cross_attn.load_state_dict(medusa_head_state_dict, strict=False)
+            model.proj_layers.load_state_dict(medusa_head_state_dict, strict=False)
             return model
         
 
