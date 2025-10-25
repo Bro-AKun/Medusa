@@ -71,6 +71,71 @@ class ResBlock(nn.Module):
         """
         return x + self.act(self.linear(x))
 
+class CrossAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads, vocab_dim ,dropout=0.1):
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        # 线性投影层
+        self.query = nn.Linear(embed_dim, embed_dim)
+        self.key = nn.Linear(embed_dim, embed_dim)
+        self.value = nn.Linear(embed_dim, embed_dim)
+        
+        # 输出层
+        self.proj = nn.Linear(embed_dim, vocab_dim)
+        
+        # # 复制 lm_head 的权重和偏置（如果存在）
+        # self.proj.weight.data.copy_(lm_head_layer.weight.data)
+        # if hasattr(lm_head_layer, 'bias') and lm_head_layer.bias is not None:
+        #     self.proj.bias.data.copy_(lm_head_layer.bias.data)
+
+        self.dropout = nn.Dropout(dropout)
+        
+        # 缩放因子
+        self.scale = self.head_dim ** -0.5
+
+    def forward(self, x, context, mask=None):
+        """
+        Args:
+            x:       Query 序列       [batch_size, seq_len_q, embed_dim]
+            context: Key/Value 序列   [batch_size, seq_len_kv, embed_dim]
+            mask:    可选的掩码        [batch_size, seq_len_q, seq_len_kv]
+        Returns:
+            out:     注意力输出        [batch_size, seq_len_q, embed_dim]
+        """
+        batch_size = x.size(0)
+        
+        # 1. 线性投影并分头
+        q = self.query(x).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)  # [B, H, L_q, D/H]
+        k = self.key(context).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)  # [B, H, L_kv, D/H]
+        v = self.value(context).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)  # [B, H, L_kv, D/H]
+        
+        # 2. 计算注意力分数
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B, H, L_q, L_kv]
+        
+        # 3. 应用掩码（可选）
+        if mask is not None:
+            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+        
+        # 4. 注意力权重和输出
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+        out = torch.matmul(attn_weights, v)  # [B, H, L_q, D/H]
+        
+        # 5. 合并多头并投影
+        out = out.transpose(1, 2).contiguous().view(batch_size, -1, self.embed_dim)
+        out = self.proj(out)
+        
+        return out
+
+def POS_embedding(current_vec: torch.Tensor, 
+                 past_vec: torch.Tensor, 
+                 numda: float) -> torch.Tensor:
+    result = current_vec + numda * past_vec
+    result = result / torch.tensor(1 + numda)
+    return result
 
 class MedusaModelABC(nn.Module):
     """The Medusa Language Model Head.
@@ -112,11 +177,19 @@ class MedusaModelABC(nn.Module):
             [
                 nn.Sequential(
                     *([ResBlock(self.hidden_size)] * medusa_num_layers),
-                    nn.Linear(self.hidden_size, self.vocab_size, bias=False),
+                    # nn.Linear(self.hidden_size, self.vocab_size, bias=False),
                 )
                 for _ in range(medusa_num_heads)
             ]
         )
+        self.cross_attn = nn.ModuleList(
+        [CrossAttention(self.hidden_size,4,self.vocab_size) for _ in range(medusa_num_heads)]
+        )
+        self.proj_layers = nn.ModuleList([
+            nn.Linear(self.vocab_size,self.hidden_size, bias=False)
+            for _ in range(medusa_num_heads)
+        ])
+
     # Add a link named base_model to self
     @property
     def base_model(self):
@@ -205,6 +278,7 @@ class MedusaModelABC(nn.Module):
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 past_key_values=past_key_values,
+                output_hidden_states=True,
                 position_ids=position_ids,
                 **kwargs,
             )
@@ -213,6 +287,24 @@ class MedusaModelABC(nn.Module):
         # Clone the output hidden states
         hidden_states = outputs[0].clone()
         medusa_logits = []
+        all_layer_outputs = outputs.hidden_states
+        x = 30
+        last_x_layers = all_layer_outputs[-x:]
+        last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
+        merged_output = torch.stack(last_token_hidden_states, dim=1)
+        print("合并后的形状:", merged_output.shape)
+
+        out_0 = self.lm_head(hidden_states)
+        embedded = POS_embedding(out_0,out_0,0.8)
+        for i in range(self.medusa_num_heads):
+            query = self.proj_layers[i](embedded)
+            print("query:", query.shape)
+            SiLued = self.medusa_head[i](merged_output)
+            predicted = self.cross_attn[i](query, SiLued)
+            # print("predicted shape:", predicted.shape) #应该输出[1,seq_len,Voacb_size]
+            medusa_logits.append(predicted)
+            embedded = POS_embedding(predicted,embedded,0.8)
+
         # TODO: Consider parallelizing this loop for efficiency?
         for i in range(self.medusa):
             medusa_logits.append(self.medusa_head[i](hidden_states))
@@ -232,139 +324,212 @@ class MedusaModelABC(nn.Module):
         warnings.warn('Please specify medusa choice configuration!')
         return mc_sim_7b_63
 
+    # def medusa_generate(
+    #     self,
+    #     input_ids,
+    #     attention_mask=None,
+    #     temperature=0.0,
+    #     max_steps=512,
+    #     # The hyperparameters below are for the Medusa
+    #     # top-1 prediciton for the next token, top-7 predictions for the next token, top-6 predictions for the next next token.
+    #     medusa_choices=None,
+    #     posterior_threshold=0.09,  # threshold validation of Medusa output
+    #     # another threshold hyperparameter, recommended to be sqrt(posterior_threshold)
+    #     posterior_alpha=0.3,
+    #     top_p=0.8, 
+    #     sampling = 'typical', 
+    #     fast = True
+    # ):
+    #     """
+    #     Args:
+    #         input_ids (torch.Tensor, optional): Input token IDs.
+    #         attention_mask (torch.Tensor, optional): Attention mask.
+    #         temperature (float, optional): Temperature for typical acceptance.
+    #         medusa_choices (list, optional): A list of integers indicating the number of choices for each Medusa head.
+    #         posterior_threshold (float, optional): Threshold for posterior validation.
+    #         posterior_alpha (float, optional): Another threshold hyperparameter, recommended to be sqrt(posterior_threshold).
+    #         top_p (float, optional): Cumulative probability threshold for nucleus sampling. Defaults to 0.8.
+    #         sampling (str, optional): Defines the sampling strategy ('typical' or 'nucleus'). Defaults to 'typical'.
+    #         fast (bool, optional): If True, enables faster, deterministic decoding for typical sampling. Defaults to False.
+    #     Returns:
+    #         torch.Tensor: Output token IDs.
+
+    #     Warning: Only support batch size 1 for now!!
+    #     """
+    #     assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
+    #     # Avoid modifying the input_ids in-place
+    #     input_ids = input_ids.clone()
+
+    #     # Cache medusa buffers (the fixed patterns for tree attention)
+    #     if medusa_choices is None:
+    #         medusa_choices = self.get_medusa_choice(self.base_model_name_or_path)
+
+    #     if hasattr(self, "medusa_choices") and self.medusa_choices == medusa_choices:
+    #         # Load the cached medusa buffer
+    #         medusa_buffers = self.medusa_buffers
+    #     else:
+    #         # Initialize the medusa buffer
+    #         medusa_buffers = generate_medusa_buffers(
+    #             medusa_choices, device=self.base_model.device
+    #         )
+    #     self.medusa_buffers = medusa_buffers
+    #     self.medusa_choices = medusa_choices
+
+    #     # Initialize the past key and value states
+    #     if hasattr(self, "past_key_values"):
+    #         past_key_values = self.past_key_values
+    #         past_key_values_data = self.past_key_values_data
+    #         current_length_data = self.current_length_data
+    #         # Reset the past key and value states
+    #         current_length_data.zero_()
+    #     else:
+    #         (
+    #             past_key_values,
+    #             past_key_values_data,
+    #             current_length_data,
+    #         ) = initialize_past_key_values(self.base_model)
+    #         self.past_key_values = past_key_values
+    #         self.past_key_values_data = past_key_values_data
+    #         self.current_length_data = current_length_data
+
+    #     input_len = input_ids.shape[1]
+
+    #     reset_medusa_mode(self)
+    #     # Initialize tree attention mask and process prefill tokens
+    #     medusa_logits, logits = initialize_medusa(
+    #         input_ids, self, medusa_buffers["medusa_attn_mask"], past_key_values
+    #     )
+
+    #     new_token = 0
+    #     last_round_token = 0
+
+    #     for idx in range(max_steps):
+    #         # Generate candidates with topk predictions from Medusa heads
+    #         candidates, tree_candidates = generate_candidates(
+    #             medusa_logits,
+    #             logits,
+    #             medusa_buffers["tree_indices"],
+    #             medusa_buffers["retrieve_indices"],
+    #             temperature=temperature,
+    #             posterior_alpha=posterior_alpha,
+    #             posterior_threshold=posterior_threshold,
+    #             top_p=top_p,
+    #             sampling=sampling,
+    #             fast=fast,
+    #         )
+
+    #         # Use tree attention to verify the candidates and get predictions
+    #         medusa_logits, logits, outputs = tree_decoding(
+    #             self,
+    #             tree_candidates,
+    #             past_key_values,
+    #             medusa_buffers["medusa_position_ids"],
+    #             input_ids,
+    #             medusa_buffers["retrieve_indices"],
+    #         )
+
+    #         # Evaluate the posterior of the candidates to select the accepted candidate prefix
+    #         best_candidate, accept_length = evaluate_posterior(
+    #             logits, candidates, temperature, posterior_threshold, posterior_alpha, top_p=top_p, sampling=sampling, fast=fast
+    #         )
+
+    #         # Update the input_ids and logits
+            # input_ids, logits, medusa_logits, new_token = update_inference_inputs(
+            #     input_ids,
+            #     candidates,
+            #     best_candidate,
+            #     accept_length,
+            #     medusa_buffers["retrieve_indices"],
+            #     outputs,
+            #     logits,
+            #     medusa_logits,
+            #     new_token,
+            #     past_key_values_data,
+            #     current_length_data,
+            # )
+
+    #         yield {
+    #             "text": self.tokenizer.decode(
+    #                 input_ids[0, input_len:],
+    #                 skip_special_tokens=True,
+    #                 spaces_between_special_tokens=False,
+    #                 clean_up_tokenization_spaces=True,
+    #             )
+    #         }
+
+    #         if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
+    #             break
+
     def medusa_generate(
         self,
         input_ids,
         attention_mask=None,
         temperature=0.0,
         max_steps=512,
-        # The hyperparameters below are for the Medusa
-        # top-1 prediciton for the next token, top-7 predictions for the next token, top-6 predictions for the next next token.
         medusa_choices=None,
-        posterior_threshold=0.09,  # threshold validation of Medusa output
-        # another threshold hyperparameter, recommended to be sqrt(posterior_threshold)
+        posterior_threshold=0.09,
         posterior_alpha=0.3,
         top_p=0.8, 
-        sampling = 'typical', 
-        fast = True
+        sampling='typical', 
+        fast=True
     ):
-        """
-        Args:
-            input_ids (torch.Tensor, optional): Input token IDs.
-            attention_mask (torch.Tensor, optional): Attention mask.
-            temperature (float, optional): Temperature for typical acceptance.
-            medusa_choices (list, optional): A list of integers indicating the number of choices for each Medusa head.
-            posterior_threshold (float, optional): Threshold for posterior validation.
-            posterior_alpha (float, optional): Another threshold hyperparameter, recommended to be sqrt(posterior_threshold).
-            top_p (float, optional): Cumulative probability threshold for nucleus sampling. Defaults to 0.8.
-            sampling (str, optional): Defines the sampling strategy ('typical' or 'nucleus'). Defaults to 'typical'.
-            fast (bool, optional): If True, enables faster, deterministic decoding for typical sampling. Defaults to False.
-        Returns:
-            torch.Tensor: Output token IDs.
 
-        Warning: Only support batch size 1 for now!!
-        """
-        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
-        # Avoid modifying the input_ids in-place
+        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!"
         input_ids = input_ids.clone()
 
-        # Cache medusa buffers (the fixed patterns for tree attention)
-        if medusa_choices is None:
-            medusa_choices = self.get_medusa_choice(self.base_model_name_or_path)
-
-        if hasattr(self, "medusa_choices") and self.medusa_choices == medusa_choices:
-            # Load the cached medusa buffer
-            medusa_buffers = self.medusa_buffers
-        else:
-            # Initialize the medusa buffer
-            medusa_buffers = generate_medusa_buffers(
-                medusa_choices, device=self.base_model.device
-            )
-        self.medusa_buffers = medusa_buffers
-        self.medusa_choices = medusa_choices
-
-        # Initialize the past key and value states
+        # 初始化 KV Cache
         if hasattr(self, "past_key_values"):
             past_key_values = self.past_key_values
-            past_key_values_data = self.past_key_values_data
             current_length_data = self.current_length_data
-            # Reset the past key and value states
             current_length_data.zero_()
         else:
-            (
-                past_key_values,
-                past_key_values_data,
-                current_length_data,
-            ) = initialize_past_key_values(self.base_model)
+            past_key_values, _, current_length_data = initialize_past_key_values(self.base_model)
             self.past_key_values = past_key_values
-            self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
 
         input_len = input_ids.shape[1]
-
         reset_medusa_mode(self)
-        # Initialize tree attention mask and process prefill tokens
-        medusa_logits, logits = initialize_medusa(
-            input_ids, self, medusa_buffers["medusa_attn_mask"], past_key_values
+
+        medusa_logits, outputs, logits = self(
+            input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
         )
 
-        new_token = 0
-        last_round_token = 0
+        for _ in range(max_steps):
+            # 直接获取主模型和 Medusa 头的 top-1 token（贪婪解码）
+            main_top1 = torch.argmax(logits[:, -1, -1], dim=-1)  # [1]
+    
+            # 获取每个 Medusa 头的 top-1 token（最后一个位置的预测）
+            medusa_top1 = [
+                torch.argmax(head[:, -1, -1], dim=-1)  # [1]
+                for head in medusa_logits
+            ]
+    
+            # 将主模型和 Medusa 头的预测合并为一个序列
+            all_preds = torch.cat([
+                main_top1.unsqueeze(0),                # 主模型的预测 [1]
+                torch.stack(medusa_top1).squeeze(1)    # Medusa 头的预测 [num_heads]
+            ], dim=0).unsqueeze(0)                     # [1, num_heads + 1]
+            
 
-        for idx in range(max_steps):
-            # Generate candidates with topk predictions from Medusa heads
-            candidates, tree_candidates = generate_candidates(
-                medusa_logits,
-                logits,
-                medusa_buffers["tree_indices"],
-                medusa_buffers["retrieve_indices"],
-                temperature=temperature,
-                posterior_alpha=posterior_alpha,
-                posterior_threshold=posterior_threshold,
-                top_p=top_p,
-                sampling=sampling,
-                fast=fast,
-            )
+            # 更新 input_ids（仅使用主模型的预测）
+            input_ids = torch.cat([input_ids, all_preds], dim=-1)
 
-            # Use tree attention to verify the candidates and get predictions
-            medusa_logits, logits, outputs = tree_decoding(
-                self,
-                tree_candidates,
-                past_key_values,
-                medusa_buffers["medusa_position_ids"],
-                input_ids,
-                medusa_buffers["retrieve_indices"],
-            )
-
-            # Evaluate the posterior of the candidates to select the accepted candidate prefix
-            best_candidate, accept_length = evaluate_posterior(
-                logits, candidates, temperature, posterior_threshold, posterior_alpha, top_p=top_p, sampling=sampling, fast=fast
-            )
-
-            # Update the input_ids and logits
-            input_ids, logits, medusa_logits, new_token = update_inference_inputs(
-                input_ids,
-                candidates,
-                best_candidate,
-                accept_length,
-                medusa_buffers["retrieve_indices"],
-                outputs,
-                logits,
-                medusa_logits,
-                new_token,
-                past_key_values_data,
-                current_length_data,
-            )
-
+            print("model input_ids length:", len(input_ids[0, input_len:]))# 期待输出是6
+            # 返回主模型和 Medusa 头的预测结果
             yield {
                 "text": self.tokenizer.decode(
                     input_ids[0, input_len:],
                     skip_special_tokens=True,
                     spaces_between_special_tokens=False,
                     clean_up_tokenization_spaces=True,
-                )
+                ),
             }
 
+            medusa_logits, outputs, logits = self(
+            input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
+            )
+
+            # 终止条件
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
                 break
 
