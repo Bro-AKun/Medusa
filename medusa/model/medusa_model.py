@@ -290,7 +290,7 @@ class MedusaModelABC(nn.Module):
         hidden_states = outputs[0].clone()
         medusa_logits = []
         all_layer_outputs = outputs.hidden_states
-        x = 30
+        x = 10
         last_x_layers = all_layer_outputs[-x:]
         last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
         merged_output = torch.stack(last_token_hidden_states, dim=1)
@@ -298,7 +298,7 @@ class MedusaModelABC(nn.Module):
 
         out_0 = self.lm_head(hidden_states)
         embedded = POS_embedding(out_0,out_0,0.8)
-        for i in range(self.medusa_num_heads):
+        for i in range(5):
             query = self.proj_layers[i](embedded)
             print("query:", query.shape)
             SiLued = self.medusa_head[i](merged_output)
@@ -308,7 +308,7 @@ class MedusaModelABC(nn.Module):
             embedded = POS_embedding(predicted,embedded,0.8)
 
         # TODO: Consider parallelizing this loop for efficiency?
-        for i in range(self.medusa):
+        for i in range(5):
             medusa_logits.append(self.medusa_head[i](hidden_states))
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
