@@ -504,6 +504,7 @@ class MedusaModelABC(nn.Module):
             current_length_data.zero_()
         else:
             past_key_values, _, current_length_data = initialize_past_key_values(self.base_model)
+            print("Initialized past key values for Medusa.")
             self.past_key_values = past_key_values
             self.current_length_data = current_length_data
 
