@@ -311,13 +311,13 @@ class MedusaModelABC(nn.Module):
         
         # last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
         # merged_output = torch.stack(last_token_hidden_states, dim=1)
-        print("合并后的形状:", merged_output.shape)
+        # print("合并后的形状:", merged_output.shape)
 
         out_0 = self.lm_head(hidden_states)
         embedded = POS_embedding(out_0,out_0,0.8)
         for i in range(5):
             query = self.proj_layers[i](embedded)
-            print("query:", query.shape)
+            # print("query:", query.shape)
             SiLued = self.medusa_head[i](merged_output)
             predicted = self.cross_attn[i](query, SiLued)
             # print("predicted shape:", predicted.shape) #应该输出[1,seq_len,Voacb_size]
@@ -522,7 +522,7 @@ class MedusaModelABC(nn.Module):
                 torch.argmax(head[:, -1, -1], dim=-1)  # [1]
                 for head in medusa_logits
             ]
-            print("medusa_top1:",medusa_top1)
+            # print("medusa_top1:",medusa_top1)
             # 将主模型和 Medusa 头的预测合并为一个序列
             # all_preds = torch.cat([
             #     main_top1.unsqueeze(0),                # 主模型的预测 [1]
@@ -538,7 +538,7 @@ class MedusaModelABC(nn.Module):
             # 更新 input_ids（仅使用主模型的预测）
             input_ids = torch.cat([input_ids, all_preds], dim=-1)
 
-            print("model input_ids length:", len(input_ids[0, input_len:]))# 期待输出是6
+            # print("model input_ids length:", len(input_ids[0, input_len:]))# 期待输出是6
             # 返回主模型和 Medusa 头的预测结果
             yield {
                 "text": self.tokenizer.decode(
