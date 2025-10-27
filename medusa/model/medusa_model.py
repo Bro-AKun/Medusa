@@ -291,17 +291,34 @@ class MedusaModelABC(nn.Module):
         hidden_states = outputs[0].clone()
         medusa_logits = []
         all_layer_outputs = outputs.hidden_states
-        x = 30
+        x = 10
         last_x_layers = all_layer_outputs[-x:]
-        last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
-        merged_output = torch.stack(last_token_hidden_states, dim=1)
-        print("合并后的形状:", merged_output.shape)
+        last_token_hidden_states = []
+        for layer in last_x_layers:
+            # 取最后一个token的特征 [1, 4096]
+            token_features = layer[:, -1, :]
+            
+            # 层内归一化（按特征维度）
+            token_features = F.layer_norm(
+                token_features, 
+                normalized_shape=[token_features.size(-1)],  # 对4096维归一化
+                eps=1e-6
+            )
+            last_token_hidden_states.append(token_features)
+        
+        # 3. 堆叠并添加全局归一化
+        merged_output = torch.stack(last_token_hidden_states, dim=1)  # [1, x, 4096]
+        merged_output = F.layer_norm(merged_output, [x, 4096], eps=1e-6)  # 跨层归一化
+        
+        # last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
+        # merged_output = torch.stack(last_token_hidden_states, dim=1)
+        # print("合并后的形状:", merged_output.shape)
 
         out_0 = self.lm_head(hidden_states)
         embedded = POS_embedding(out_0,out_0,0.8)
-        for i in range(self.medusa_num_heads):
+        for i in range(5):
             query = self.proj_layers[i](embedded)
-            print("query:", query.shape)
+            # print("query:", query.shape)
             SiLued = self.medusa_head[i](merged_output)
             predicted = self.cross_attn[i](query, SiLued)
             # print("predicted shape:", predicted.shape) #应该输出[1,seq_len,Voacb_size]
@@ -309,8 +326,8 @@ class MedusaModelABC(nn.Module):
             embedded = POS_embedding(predicted,embedded,0.8)
 
         # TODO: Consider parallelizing this loop for efficiency?
-        for i in range(self.medusa):
-            medusa_logits.append(self.medusa_head[i](hidden_states))
+        # for i in range(5):
+        #     medusa_logits.append(self.medusa_head[i](hidden_states))
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
         return torch.stack(medusa_logits, dim=0)
@@ -500,24 +517,29 @@ class MedusaModelABC(nn.Module):
         for _ in range(max_steps):
             # 直接获取主模型和 Medusa 头的 top-1 token（贪婪解码）
             main_top1 = torch.argmax(logits[:, -1, -1], dim=-1)  # [1]
-    
+            print("main_top:",main_top1)
             # 获取每个 Medusa 头的 top-1 token（最后一个位置的预测）
             medusa_top1 = [
                 torch.argmax(head[:, -1, -1], dim=-1)  # [1]
                 for head in medusa_logits
             ]
-    
+            # print("medusa_top1:",medusa_top1)
             # 将主模型和 Medusa 头的预测合并为一个序列
+            # all_preds = torch.cat([
+            #     main_top1.unsqueeze(0),                # 主模型的预测 [1]
+            #     torch.stack(medusa_top1).squeeze(1)    # Medusa 头的预测 [num_heads]
+            # ], dim=0).unsqueeze(0)                     # [1, num_heads + 1]
+
             all_preds = torch.cat([
-                main_top1.unsqueeze(0),                # 主模型的预测 [1]
-                torch.stack(medusa_top1).squeeze(1)    # Medusa 头的预测 [num_heads]
-            ], dim=0).unsqueeze(0)                     # [1, num_heads + 1]
+                main_top1.unsqueeze(0),                    # 主模型预测: [1] -> [1]
+                torch.stack(medusa_top1)                    # Medusa头预测: [5] -> [5]
+            ], dim=0).unsqueeze(0)  
             
 
             # 更新 input_ids（仅使用主模型的预测）
             input_ids = torch.cat([input_ids, all_preds], dim=-1)
 
-            print("model input_ids length:", len(input_ids[0, input_len:]))# 期待输出是6
+            # print("model input_ids length:", len(input_ids[0, input_len:]))# 期待输出是6
             # 返回主模型和 Medusa 头的预测结果
             yield {
                 "text": self.tokenizer.decode(
