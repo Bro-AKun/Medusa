@@ -561,7 +561,7 @@ class MedusaModelABC(nn.Module):
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
                 break
             current_generated_length = input_ids.shape[1] - input_len
-            if current_generated_length >= 2000:
+            if current_generated_length >= 1000:
                 print(f"达到最大生成长度限制: {current_generated_length} tokens")
                 print(input_ids)
                 break
