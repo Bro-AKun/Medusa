@@ -524,10 +524,15 @@ class MedusaModelABC(nn.Module):
             ]
             print("medusa_top1:",medusa_top1)
             # 将主模型和 Medusa 头的预测合并为一个序列
+            # all_preds = torch.cat([
+            #     main_top1.unsqueeze(0),                # 主模型的预测 [1]
+            #     torch.stack(medusa_top1).squeeze(1)    # Medusa 头的预测 [num_heads]
+            # ], dim=0).unsqueeze(0)                     # [1, num_heads + 1]
+
             all_preds = torch.cat([
-                main_top1.unsqueeze(0),                # 主模型的预测 [1]
-                torch.stack(medusa_top1).squeeze(1)    # Medusa 头的预测 [num_heads]
-            ], dim=0).unsqueeze(0)                     # [1, num_heads + 1]
+                main_top1.unsqueeze(0),                    # 主模型预测: [1] -> [1]
+                torch.stack(medusa_top1)                    # Medusa头预测: [5] -> [5]
+            ], dim=0).unsqueeze(0)  
             
 
             # 更新 input_ids（仅使用主模型的预测）
