@@ -561,6 +561,7 @@ class MedusaModelABC(nn.Module):
             current_generated_length = input_ids.shape[1] - input_len
             if current_generated_length >= 300:
                 print(f"达到最大生成长度限制: {current_generated_length} tokens")
+                print(input_ids)
                 break
 
 
