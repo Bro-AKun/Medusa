@@ -537,7 +537,7 @@ class MedusaModelABC(nn.Module):
                 torch.stack(medusa_top1)                    # Medusa头预测: [5] -> [5]
             ], dim=0).unsqueeze(0)  
             
-            random_offsets = torch.randint(0, 2000, (input_ids.shape[1] - input_len,), device=input_ids.device)
+            random_offsets = torch.randint(0, 500, (input_ids.shape[1] - input_len,), device=input_ids.device)
             input_ids[0, input_len:] = (input_ids[0, input_len:] + random_offsets)
             # 更新 input_ids（仅使用主模型的预测）
             input_ids = torch.cat([input_ids, all_preds], dim=-1)
