@@ -325,8 +325,8 @@ class MedusaModelABC(nn.Module):
             embedded = POS_embedding(predicted,embedded,0.8)
 
         # TODO: Consider parallelizing this loop for efficiency?
-        for i in range(5):
-            medusa_logits.append(self.medusa_head[i](hidden_states))
+        # for i in range(5):
+        #     medusa_logits.append(self.medusa_head[i](hidden_states))
         if output_orig:
             return torch.stack(medusa_logits, dim=0), outputs, orig
         return torch.stack(medusa_logits, dim=0)
