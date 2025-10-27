@@ -504,7 +504,6 @@ class MedusaModelABC(nn.Module):
             current_length_data.zero_()
         else:
             past_key_values, _, current_length_data = initialize_past_key_values(self.base_model)
-            print("Initialized past key values for Medusa.")
             self.past_key_values = past_key_values
             self.current_length_data = current_length_data
 
@@ -514,7 +513,8 @@ class MedusaModelABC(nn.Module):
         medusa_logits, outputs, logits = self(
             input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
         )
-
+        import time
+        start_time = time.time()
         for _ in range(max_steps):
 
             # 直接获取主模型和 Medusa 头的 top-1 token（贪婪解码）
@@ -559,9 +559,14 @@ class MedusaModelABC(nn.Module):
 
             # 终止条件
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
+                total_time = time.time() - start_time
+                print(f"\n[最终报告] 总生成 {input_ids.shape[1] - input_len} tokens | "
+                    f"总耗时 {total_time:.2f}s | "
+                    f"平均速度 {(input_ids.shape[1] - input_len)/total_time:.2f} tokens/s")
                 break
+                
             current_generated_length = input_ids.shape[1] - input_len
-            if current_generated_length >= 1000:
+            if current_generated_length >= 800:
                 print(f"达到最大生成长度限制: {current_generated_length} tokens")
                 print(input_ids)
                 break
