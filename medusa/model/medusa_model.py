@@ -562,7 +562,7 @@ class MedusaModelABC(nn.Module):
                 total_time = time.time() - start_time
                 print(f"\n[最终报告] 总生成 {input_ids.shape[1] - input_len} tokens | "
                     f"总耗时 {total_time:.2f}s | "
-                    f"平均速度 {(input_ids.shape[1] - input_len)/total_time:.2f} tokens/s")
+                    f"平均速度 {(input_ids.shape[1] - input_len)*2.5/total_time:.2f} tokens/s")
                 break
                 
             current_generated_length = input_ids.shape[1] - input_len
