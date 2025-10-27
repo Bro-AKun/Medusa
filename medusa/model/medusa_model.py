@@ -311,6 +311,9 @@ class MedusaModelABC(nn.Module):
         new_token = 0
         last_round_token = 0
 
+        import time
+        start_time = time.time()
+
         for idx in range(max_steps):
             # Generate candidates with topk predictions from Medusa heads
             candidates, tree_candidates = generate_candidates(
@@ -366,6 +369,10 @@ class MedusaModelABC(nn.Module):
             }
 
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
+                total_time = time.time() - start_time
+                print(f"\n[最终报告] 总生成 {input_ids.shape[1] - input_len} tokens | "
+                    f"总耗时 {total_time:.2f}s | "
+                    f"平均速度 {(input_ids.shape[1] - input_len)/total_time:.2f} tokens/s")
                 break
 
 
