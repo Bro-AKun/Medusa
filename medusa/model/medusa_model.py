@@ -535,7 +535,6 @@ class MedusaModelABC(nn.Module):
                 torch.stack(medusa_top1)                    # Medusa头预测: [5] -> [5]
             ], dim=0).unsqueeze(0)  
             
-
             # 更新 input_ids（仅使用主模型的预测）
             input_ids = torch.cat([input_ids, all_preds], dim=-1)
 

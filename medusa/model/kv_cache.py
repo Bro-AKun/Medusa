@@ -64,54 +64,6 @@ class KVCache:
         dst.copy_(tensor)
         self.current_length.add_(tensor.shape[dim])
         return torch.narrow(self.data, 2, 0, self.current_length)
-    
-    def cat(self, tensor: torch.Tensor, dim: int = 2):
-        """
-        Concatenate the given tensor with the current data.
-        """
-        # 获取当前长度和最大长度
-        current_len = self.current_length.item() if isinstance(self.current_length, torch.Tensor) else self.current_length
-        max_len = self.data.shape[dim]
-        
-        # 检查是否会超出限制
-        if current_len + tensor.shape[dim] > max_len:
-            # 动态扩展缓存
-            required_additional = current_len + tensor.shape[dim] - max_len
-            self._expand_cache(required_additional, dim)
-        
-        dst = self.data.narrow(dim, self.current_length, tensor.shape[dim])
-        dst.copy_(tensor)
-        
-        # 更新长度
-        if isinstance(self.current_length, torch.Tensor):
-            self.current_length.add_(tensor.shape[dim])
-        else:
-            self.current_length += tensor.shape[dim]
-        
-        return torch.narrow(self.data, dim, 0, self.current_length)
-
-    def _expand_cache(self, additional_size, dim):
-        """动态扩展缓存大小"""
-        old_size = self.data.shape[dim]
-        new_size = old_size + additional_size
-        print(f"动态扩展 KV Cache: {old_size} -> {new_size}")
-        
-        # 创建新的更大缓存
-        new_shape = list(self.data.shape)
-        new_shape[dim] = new_size
-        
-        new_data = torch.zeros(
-            *new_shape,
-            dtype=self.data.dtype,
-            device=self.data.device
-        )
-        
-        # 复制现有数据
-        slices = [slice(None)] * self.data.dim()
-        slices[dim] = slice(0, self.current_length)
-        new_data[tuple(slices)] = self.data[tuple(slices)]
-        
-        self.data = new_data
 
 
 def initialize_past_key_values(model):
@@ -139,7 +91,7 @@ def initialize_past_key_values(model):
         config.num_hidden_layers * 2,
         batch_size,
         config.num_key_value_heads,
-        config.max_position_embeddings,
+        config.max_position_embeddings*1.5,
         config.hidden_size // config.num_attention_heads,
         device=model.device,
         dtype=model.dtype,
@@ -159,43 +111,3 @@ def initialize_past_key_values(model):
             ]
         )
     return past_key_values, past_key_values_data, current_length_data
-
-# def initialize_past_key_values(model, max_length_multiplier=2):
-#     """
-#     Initialize past key and value states for a given transformer model.
-
-#     Args:
-#         model (nn.Module): The transformer model.
-#         max_length_multiplier (int): 缓存大小倍数，默认为2倍最大位置嵌入
-#     """
-#     config = model.config
-#     batch_size = 1
-    
-#     # 增加缓存大小
-#     cache_size = config.max_position_embeddings * max_length_multiplier
-    
-#     past_key_values_data = torch.zeros(
-#         config.num_hidden_layers * 2,
-#         batch_size,
-#         config.num_key_value_heads,
-#         cache_size,  # 使用更大的缓存大小
-#         config.hidden_size // config.num_attention_heads,
-#         device=model.device,
-#         dtype=model.dtype,
-#     )
-    
-#     current_length_data = torch.zeros(
-#         config.num_hidden_layers * 2, dtype=torch.long, device="cpu"
-#     )
-    
-#     past_key_values = [] * config.num_hidden_layers
-#     for i in range(config.num_hidden_layers):
-#         past_key_values.append(
-#             [
-#                 KVCache(past_key_values_data[i * 2 + j], current_length_data[i * 2 + j])
-#                 for j in range(2)
-#             ]
-#         )
-    
-#     print(f"初始化 KV Cache: 最大长度 = {cache_size}")
-#     return past_key_values, past_key_values_data, current_length_data
