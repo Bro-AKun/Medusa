@@ -292,8 +292,25 @@ class MedusaModelABC(nn.Module):
         all_layer_outputs = outputs.hidden_states
         x = 10
         last_x_layers = all_layer_outputs[-x:]
-        last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
-        merged_output = torch.stack(last_token_hidden_states, dim=1)
+        last_token_hidden_states = []
+        for layer in last_x_layers:
+            # 取最后一个token的特征 [1, 4096]
+            token_features = layer[:, -1, :]
+            
+            # 层内归一化（按特征维度）
+            token_features = F.layer_norm(
+                token_features, 
+                normalized_shape=[token_features.size(-1)],  # 对4096维归一化
+                eps=1e-6
+            )
+            last_token_hidden_states.append(token_features)
+        
+        # 3. 堆叠并添加全局归一化
+        merged_output = torch.stack(last_token_hidden_states, dim=1)  # [1, x, 4096]
+        merged_output = F.layer_norm(merged_output, [x, 4096], eps=1e-6)  # 跨层归一化
+        
+        # last_token_hidden_states = [layer[:, -1, :] for layer in last_x_layers]
+        # merged_output = torch.stack(last_token_hidden_states, dim=1)
         print("合并后的形状:", merged_output.shape)
 
         out_0 = self.lm_head(hidden_states)
