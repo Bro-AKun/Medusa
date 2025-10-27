@@ -517,7 +517,7 @@ class MedusaModelABC(nn.Module):
         for _ in range(max_steps):
             # 直接获取主模型和 Medusa 头的 top-1 token（贪婪解码）
             main_top1 = torch.argmax(logits[:, -1, -1], dim=-1)  # [1]
-            print("main_top:",main_top1)
+            # print("main_top:",main_top1)
             # 获取每个 Medusa 头的 top-1 token（最后一个位置的预测）
             medusa_top1 = [
                 torch.argmax(head[:, -1, -1], dim=-1)  # [1]
