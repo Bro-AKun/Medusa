@@ -221,6 +221,7 @@ class MedusaModelABC(nn.Module):
                 **kwargs,
                 config=base_model_config,
             )
+            # medusa_head_path = os.path.join(pretrained_model_name_or_path, "medusa_lm_head.pt")
             medusa_head_path = os.path.join(pretrained_model_name_or_path, "medusa_lm_head.pt")
             if os.path.exists(medusa_head_path):
                 filename = medusa_head_path
