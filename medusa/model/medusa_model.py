@@ -563,13 +563,6 @@ class MedusaModelABC(nn.Module):
         assert input_ids.shape[0] == 1, "Only support batch size 1 for now!"
         input_ids = input_ids.clone()
 
-        model_dtype = next(self.parameters()).dtype
-        print(f"模型数据类型: {model_dtype}")
-    
-        # 确保输入数据与模型数据类型一致
-        if input_ids.dtype != model_dtype:
-            input_ids = input_ids.to(model_dtype)
-
         # 初始化 KV Cache
         if hasattr(self, "past_key_values"):
             past_key_values = self.past_key_values
