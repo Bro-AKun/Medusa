@@ -331,7 +331,15 @@ class MedusaModelABC(nn.Module):
             # for i, layer_output in enumerate(all_layer_outputs):
             #     print(f"Layer {i} output shape:", layer_output.shape)
         x = 10  
+
+        # 获取模型的数据类型
+        model_dtype = next(self.parameters()).dtype
+        print(f"模型数据类型: {model_dtype}")
+
         x_layers = all_layer_outputs[-x:]  # 列表，包含x个 [1, 4096, 4096] 张量
+        # 统一转换所有层输出为模型数据类型
+        x_layers = [layer.to(model_dtype) for layer in x_layers]
+
         last_x_layers = torch.cat(x_layers, dim=0).transpose(0, 1)
         embedded = out_0.transpose(0,1)
         embedded_cat = embedded
