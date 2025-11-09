@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import time
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 from .modeling_mistral_kv import MistralForCausalLM as KVMistralForCausalLM
 # import transformers
@@ -277,6 +278,7 @@ class MedusaModelABC(nn.Module):
 
     def forward(
         self,
+        POS_list,
         input_ids=None,
         attention_mask=None,
         past_key_values=None,
@@ -334,15 +336,22 @@ class MedusaModelABC(nn.Module):
         embedded = out_0.transpose(0,1)
         embedded_cat = embedded
         for i in range(self.medusa_num_heads):
+            start_ = time.perf_counter()
             SiLued = self.medusa_head[i](last_x_layers)
+            cross_stime = time.perf_counter()
             predicted = self.cross_attn[i](embedded, SiLued)
+            cross_etime = time.perf_counter()
             print("predicted shape:", predicted.shape) #应该输出[1,seq_len,Voacb_size]
             medusa_logits.append(predicted)
             embedded_cat = torch.cat((embedded_cat, predicted), dim=1)
-            embedded_pos = Rotator(embedded_cat.shape[-1], torch.arange(i+2)).rotate(embedded_cat)
+            # embedded_pos = Rotator(embedded_cat.shape[-1], torch.arange(i+2)).rotate(embedded_cat)
+            embedded_pos = POS_list[i].rotate(embedded_cat)
             # print("embedded_pos shape:", embedded_pos.shape) #应该输出[seq_len,num_head,32000]
             embedded = avg_pooling(embedded_pos)
-        print("medusa_logits shape:",torch.stack(medusa_logits, dim=0).transpose(1,2).shape)#应该输出[6,1,seq_len,Vocab_size]
+            end_ = time.perf_counter()
+            # print(f"Medusa Head {i+1}: Total Time: {end_-start_:.4f}s | CrossAttention Time: {cross_etime - cross_stime:.4f}s")
+            print(f"Medusa Head {i+1}: Total Time: {end_-start_:.4f}s | CrossAttention Time: {cross_etime - cross_stime:.4f}s | ratio: {(cross_etime - cross_stime)/(end_-start_):.2%}")
+        # print("medusa_logits shape:",torch.stack(medusa_logits, dim=0).transpose(1,2).shape)#应该输出[6,1,seq_len,Vocab_size]
         return torch.stack(medusa_logits, dim=0).transpose(1,2)
         # # Clone the output hidden states
         # hidden_states = outputs[0].clone()
@@ -567,8 +576,11 @@ class MedusaModelABC(nn.Module):
         input_len = input_ids.shape[1]
         reset_medusa_mode(self)
 
+        #初始化POS embedding列表
+        POS_list = [Rotator(self.vocab_size, torch.arange(i+2)) for i in range(self.medusa)]
+
         medusa_logits, outputs, logits = self(
-            input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
+            POS_list,input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
         )
         import time
         start_time = time.time()
@@ -582,12 +594,6 @@ class MedusaModelABC(nn.Module):
                 torch.argmax(head[:, -1, -1], dim=-1)  # [1]
                 for head in medusa_logits
             ]
-            # print("medusa_top1:",medusa_top1)
-            # 将主模型和 Medusa 头的预测合并为一个序列
-            # all_preds = torch.cat([
-            #     main_top1.unsqueeze(0),                # 主模型的预测 [1]
-            #     torch.stack(medusa_top1).squeeze(1)    # Medusa 头的预测 [num_heads]
-            # ], dim=0).unsqueeze(0)                     # [1, num_heads + 1]
 
             all_preds = torch.cat([
                 main_top1.unsqueeze(0),                    # 主模型预测: [1] -> [1]
@@ -622,11 +628,11 @@ class MedusaModelABC(nn.Module):
                     f"平均速度 {(input_ids.shape[1] - input_len)*1.5/total_time:.2f} tokens/s")
                 break
                 
-            current_generated_length = input_ids.shape[1] - input_len
-            if current_generated_length >= 1000:
-                print(f"达到最大生成长度限制: {current_generated_length} tokens")
-                print(input_ids)
-                break
+            # current_generated_length = input_ids.shape[1] - input_len
+            # if current_generated_length >= 1000:
+            #     print(f"达到最大生成长度限制: {current_generated_length} tokens")
+            #     print(input_ids)
+            #     break
 
 
 class MedusaModelLlama(MedusaModelABC, KVLlamaForCausalLM):
