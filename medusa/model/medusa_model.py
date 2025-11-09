@@ -145,6 +145,11 @@ class CrossAttention(nn.Module):
         Returns:
             out:     注意力输出        [batch_size, seq_len_q, embed_dim]
         """
+        if x.dtype != self.query.weight.dtype:
+            x = x.to(self.query.weight.dtype)
+        if context.dtype != self.key.weight.dtype:
+            context = context.to(self.key.weight.dtype)
+
         batch_size = x.size(0)
         
         # 1. 线性投影并分头
