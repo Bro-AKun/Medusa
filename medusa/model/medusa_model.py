@@ -578,10 +578,10 @@ class MedusaModelABC(nn.Module):
 
         #初始化POS embedding列表
         POS_list = [Rotator(self.vocab_size, torch.arange(i+2)) for i in range(self.medusa)]
-
-        medusa_logits, outputs, logits = self(
-            POS_list,input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
-        )
+        with torch.no_grad():
+            medusa_logits, outputs, logits = self(
+                POS_list,input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
+            )
         import time
         start_time = time.time()
         for _ in range(max_steps):
@@ -615,10 +615,10 @@ class MedusaModelABC(nn.Module):
                     clean_up_tokenization_spaces=True,
                 ),
             }
-
-            medusa_logits, outputs, logits = self(
-            input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
-            )
+            with torch.no_grad():
+                medusa_logits, outputs, logits = self(
+                input_ids, past_key_values=past_key_values, output_orig=True, medusa_forward=True
+                )
 
             # 终止条件
             if self.tokenizer.eos_token_id in input_ids[0, input_len:]:
