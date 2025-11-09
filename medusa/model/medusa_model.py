@@ -109,7 +109,7 @@ def avg_pooling(x):
     return torch.mean(x, dim=1, keepdim=True)
 
 class CrossAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, vocab_dim ,lm_head_layer,dropout=0.1):
+    def __init__(self, embed_dim, num_heads, vocab_dim,dropout=0.1):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -123,10 +123,10 @@ class CrossAttention(nn.Module):
         # 输出层
         self.proj = nn.Linear(embed_dim, vocab_dim)
         
-        # 复制 lm_head 的权重和偏置（如果存在）
-        self.proj.weight.data.copy_(lm_head_layer.weight.data)
-        if hasattr(lm_head_layer, 'bias') and lm_head_layer.bias is not None:
-            self.proj.bias.data.copy_(lm_head_layer.bias.data)
+        # # 复制 lm_head 的权重和偏置（如果存在）
+        # self.proj.weight.data.copy_(lm_head_layer.weight.data)
+        # if hasattr(lm_head_layer, 'bias') and lm_head_layer.bias is not None:
+         #     self.proj.bias.data.copy_(lm_head_layer.bias.data)
 
         self.dropout = nn.Dropout(dropout)
         
