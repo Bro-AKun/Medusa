@@ -335,7 +335,7 @@ class MedusaModelABC(nn.Module):
         last_x_layers = torch.cat(x_layers, dim=0).transpose(0, 1)
         embedded = out_0.transpose(0,1)
         embedded_cat = embedded
-        for i in range(self.medusa_num_heads):
+        for i in range(self.medusa):
             start_ = time.perf_counter()
             SiLued = self.medusa_head[i](last_x_layers)
             cross_stime = time.perf_counter()
